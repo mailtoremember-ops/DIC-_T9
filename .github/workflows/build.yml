@@ -1,108 +1,75 @@
-name: Build Windows EXE
+name: Build T9Hebrew EXE
 
 on:
-  push:
-    branches: [main, master]
-    tags:
-      - "v*"
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0) — leave empty for dev build'
+        required: false
+        default: ''
 
 jobs:
   build:
-    name: Build T9Hebrew.exe
     runs-on: windows-latest
 
     steps:
-      # ── Checkout ─────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Python setup ─────────────────────────────────────────────────────────
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: '3.11'
+          cache: ''
 
-      # ── Dependencies ──────────────────────────────────────────────────────────
       - name: Install build dependencies
         run: pip install pyinstaller
 
-      # ── Hebrew dictionary ─────────────────────────────────────────────────────
-      - name: Download Hebrew dictionary (Hspell / LibreOffice)
+      - name: Download Hebrew dictionary
         run: |
           python -c "
-          import urllib.request, pathlib, sys
-
-          url  = 'https://raw.githubusercontent.com/LibreOffice/dictionaries/master/he_IL/he_IL.dic'
-          dest = pathlib.Path('he_IL.dic')
-
-          print(f'Downloading Hebrew dictionary from {url} ...')
-          urllib.request.urlretrieve(url, dest)
-
-          size_kb = dest.stat().st_size // 1024
-          print(f'Downloaded successfully: {dest}  ({size_kb} KB)')
-
-          # Quick sanity check: count Hebrew entries
-          with open(dest, encoding='utf-8', errors='ignore') as fh:
-              lines = fh.readlines()
-          print(f'Total entries (including header): {len(lines):,}')
+          import urllib.request, os
+          url = 'https://raw.githubusercontent.com/LibreOffice/dictionaries/master/he_IL/he_IL.dic'
+          urllib.request.urlretrieve(url, 'he_IL.dic')
+          print('Dictionary downloaded:', os.path.getsize('he_IL.dic'), 'bytes')
           "
 
-      # ── Build EXE ─────────────────────────────────────────────────────────────
-      - name: Build with PyInstaller
-        run: >
-          pyinstaller
-          --onefile
-          --windowed
-          --name T9Hebrew
-          --add-data "he_IL.dic;."
-          --hidden-import tkinter
-          --hidden-import tkinter.ttk
-          --hidden-import tkinter.font
-          main.py
-
-      # ── Smoke test (headless check) ───────────────────────────────────────────
-      - name: Verify EXE was produced
+      - name: Build EXE with PyInstaller
         run: |
-          $exe = "dist\T9Hebrew.exe"
-          if (Test-Path $exe) {
-            $size = (Get-Item $exe).Length / 1MB
-            Write-Host "✓  EXE produced: $exe  ($([math]::Round($size,1)) MB)"
+          pyinstaller --onefile --windowed --name T9Hebrew --add-data "he_IL.dic;." main.py
+
+      - name: Verify build output
+        run: |
+          if (Test-Path "dist\T9Hebrew.exe") {
+            $size = (Get-Item "dist\T9Hebrew.exe").Length / 1MB
+            Write-Host "Build successful! EXE size: $([math]::Round($size,2)) MB"
           } else {
-            Write-Error "✗  EXE not found!"
+            Write-Error "Build failed — EXE not found"
             exit 1
           }
         shell: pwsh
 
-      # ── Upload artifact (every run) ───────────────────────────────────────────
-      - name: Upload build artifact
+      - name: Upload EXE as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T9Hebrew-windows
+          name: T9Hebrew-${{ github.run_number }}
           path: dist/T9Hebrew.exe
           retention-days: 30
 
-      # ── Create GitHub Release (on version tag only) ───────────────────────────
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Create GitHub Release
+        if: ${{ github.event.inputs.version != '' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/T9Hebrew.exe
-          name: "T9Hebrew ${{ github.ref_name }}"
+          tag_name: ${{ github.event.inputs.version }}
+          name: T9Hebrew ${{ github.event.inputs.version }}
           body: |
-            ## מפענח T9 עברי — ${{ github.ref_name }}
+            ## מפענח T9 עברי — ${{ github.event.inputs.version }}
 
             ### הורדה
-            הורד את הקובץ `T9Hebrew.exe` ופתח אותו ישירות — אין צורך בהתקנה.
+            הורד את `T9Hebrew.exe` מהקבצים המצורפים למטה.
 
-            ### מה חדש
-            ראה את היסטוריית ה-commits לפרטים על שינויים בגרסה זו.
-
-            ### Hebrew dictionary
-            Bundled dictionary sourced from [LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/he_IL)
-            (based on [Hspell](http://hspell.ivrix.org.il/) by Nadav Har'El).
+            ### הפעלה
+            לחץ פעמיים על הקובץ — אין צורך בהתקנה.
+          files: dist/T9Hebrew.exe
           draft: false
           prerelease: false
